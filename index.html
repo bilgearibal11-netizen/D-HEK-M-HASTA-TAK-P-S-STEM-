@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diş Kliniği Randevu Demo</title>
+<style>
+:root{--bg:#f7f8fa;--panel:#fff;--border:#e3e6ea;--text:#1c2430;--muted:#69707c;--accent:#2f6fed;--accent-light:#eaf1ff;--danger:#e3564c;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+header{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+header h1{font-size:16px;margin:0;}
+header p{margin:1px 0 0;font-size:12px;color:var(--muted);}
+.btn{border:1px solid var(--border);background:var(--panel);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer;}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.btn-danger{color:var(--danger);border-color:var(--danger);}
+.sm{padding:5px 9px;font-size:12px;}
+.wrap{max-width:640px;margin:0 auto;padding:14px;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px;}
+input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
+label{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px;}
+.row{display:flex;gap:8px;} .row>*{flex:1;}
+.tabs{display:flex;gap:6px;margin-bottom:12px;}
+.tab{padding:7px 14px;border-radius:20px;font-size:13px;border:1px solid var(--border);cursor:pointer;background:var(--panel);}
+.tab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.cal-h{text-align:center;font-size:11px;color:var(--muted);padding:4px 0;}
+.cal-d{position:relative;text-align:center;padding:10px 0;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;}
+.cal-d.today{border-color:var(--accent);font-weight:700;}
+.cal-d.sel{background:var(--accent);color:#fff;border-color:var(--accent);}
+.cal-n{position:absolute;top:1px;right:3px;font-size:10px;background:var(--danger);color:#fff;border-radius:8px;padding:0 5px;}
+.row-item{border-bottom:1px solid var(--border);padding:9px 0;font-size:13px;}
+.row-item:last-child{border-bottom:none;}
+.meta{color:var(--muted);font-size:11.5px;margin-top:2px;}
+.patient-item{padding:9px 10px;border-radius:8px;cursor:pointer;border:1px solid var(--border);margin-bottom:6px;font-size:14px;}
+.empty{color:var(--muted);font-size:13px;padding:10px 0;}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+.modal{background:var(--panel);width:100%;max-width:480px;border-radius:16px 16px 0 0;padding:16px;max-height:85vh;overflow-y:auto;}
+@media(min-width:640px){.modal-bg{align-items:center;}.modal{border-radius:16px;}}
+.err{color:var(--danger);font-size:12.5px;margin-top:8px;}
+.demo-note{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+let token=null, me=null, view='calendar', calMonth=new Date(), calDay=todayStr();
+function todayStr(d){d=d||new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function esc(s){return (s||'').toString().replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+async function api(path, opts){
+  opts=opts||{};
+  opts.headers={'Content-Type':'application/json', ...(token?{'Authorization':'Bearer '+token}:{})};
+  const r=await fetch(path, opts);
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.detail||'Bir hata oluştu');
+  return d;
+}
+
+function renderLogin(err){
+  document.getElementById('root').innerHTML=`
+  <div class="wrap" style="padding-top:60px;">
+    <div class="card">
+      <h2 style="margin-top:0">🦷 Klinik Girişi (Demo)</h2>
+      <label>E-posta</label><input id="lg_email" value="admin@demo.local">
+      <label>Şifre</label><input id="lg_pass" type="password" value="admin123">
+      <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="doLogin()">Giriş Yap</button>
+      ${err?`<div class="err">${esc(err)}</div>`:''}
+      <div class="demo-note">Demo hesaplar:<br>
+      Yönetici: admin@demo.local / admin123<br>
+      Hekim: hekim@demo.local / hekim123<br>
+      Sekreter: sekreter@demo.local / sekreter123</div>
+    </div>
+  </div>`;
+}
+async function doLogin(){
+  try{
+    const email=document.getElementById('lg_email').value.trim();
+    const pass=document.getElementById('lg_pass').value;
+    const d=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password:pass})});
+    token=d.token; me=d.user; me.clinic=d.clinic;
+    renderApp();
+  }catch(e){ renderLogin(e.message); }
+}
+function logout(){ token=null; me=null; renderLogin(); }
+
+function renderApp(){
+  document.getElementById('root').innerHTML=`
+  <header>
+    <div><h1>🦷 ${esc(me.clinic.name)}</h1><p>${esc(me.name)} · ${esc(me.role)}</p></div>
+    <div style="margin-left:auto"><button class="btn sm" onclick="logout()">Çıkış</button></div>
+  </header>
+  <div class="wrap">
+    <div class="tabs">
+      <div class="tab ${view==='calendar'?'active':''}" onclick="setView('calendar')">📅 Takvim</div>
+      <div class="tab ${view==='patients'?'active':''}" onclick="setView('patients')">Hastalar</div>
+    </div>
+    <div id="main"></div>
+  </div>`;
+  renderMain();
+}
+function setView(v){ view=v; renderMain(); }
+async function renderMain(){
+  const main=document.getElementById('main');
+  main.innerHTML='<div class="empty">Yükleniyor…</div>';
+  try{
+    if(view==='calendar') await renderCalendar(main);
+    else await renderPatients(main);
+  }catch(e){ main.innerHTML=`<div class="card err">${esc(e.message)}</div>`; }
+}
+
+// ---- Takvim ----
+async function renderCalendar(main){
+  const y=calMonth.getFullYear(), m=calMonth.getMonth();
+  const offset=(new Date(y,m,1).getDay()+6)%7, days=new Date(y,m+1,0).getDate(), t=todayStr();
+  const all=await api('/api/appointments');
+  const counts={}; all.forEach(a=>{ const d=a.start_at.slice(0,10); if(a.status!=='cancelled') counts[d]=(counts[d]||0)+1; });
+  let cells=['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'].map(d=>`<div class="cal-h">${d}</div>`).join('')+'<div></div>'.repeat(offset);
+  for(let d=1; d<=days; d++){
+    const ds=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'), c=counts[ds];
+    cells+=`<div class="cal-d ${ds===t?'today':''} ${ds===calDay?'sel':''}" onclick="calPick('${ds}')">${d}${c?`<span class="cal-n">${c}</span>`:''}</div>`;
+  }
+  const list=all.filter(a=>a.start_at.slice(0,10)===calDay);
+  const dayName=new Date(calDay+'T00:00:00').toLocaleDateString('tr-TR',{day:'numeric',month:'long',weekday:'long'});
+  main.innerHTML=`
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <button class="btn sm" onclick="calNav(-1)">◀</button>
+      <strong>${new Date(y,m,1).toLocaleDateString('tr-TR',{month:'long',year:'numeric'})}</strong>
+      <button class="btn sm" onclick="calNav(1)">▶</button>
+    </div>
+    <div class="cal-grid">${cells}</div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <strong>${dayName}</strong>
+      <button class="btn btn-primary sm" onclick="openApptModal()">+ Randevu</button>
+    </div>
+    ${list.length? list.map(a=>`
+      <div class="row-item">
+        <strong>${a.start_at.slice(11,16)}</strong> — ${esc(a.patient_name)}
+        <span class="meta">${a.status==='cancelled'?'(İptal edildi)':''}</span>
+        <div class="meta">${esc(a.service_name)} · Dr. ${esc(a.dentist_name)}</div>
+        ${a.status!=='cancelled'?`<button class="btn sm btn-danger" style="margin-top:6px" onclick="cancelAppt('${a.id}')">İptal Et</button>`:''}
+      </div>`).join('') : '<div class="empty">Bu gün için randevu yok.</div>'}
+  </div>`;
+}
+function calNav(n){ calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()+n,1); renderMain(); }
+function calPick(d){ calDay=d; renderMain(); }
+async function cancelAppt(id){
+  if(!confirm('Randevu iptal edilsin mi?')) return;
+  try{ await api('/api/appointments/'+id,{method:'DELETE'}); renderMain(); }
+  catch(e){ alert(e.message); }
+}
+async function openApptModal(){
+  const [patients, dentists, services] = await Promise.all([api('/api/patients'), api('/api/dentists'), api('/api/services')]);
+  showModal(`
+    <h3>Randevu Ekle</h3>
+    <label>Hasta</label>
+    <select id="ap_pid">${patients.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}<option value="__new">+ Yeni hasta…</option></select>
+    <div id="ap_newpatient" style="display:none"><label>Yeni hasta adı</label><input id="ap_newname"><label>Telefon</label><input id="ap_newphone"></div>
+    <label>Hekim</label><select id="ap_did">${dentists.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select>
+    <label>Hizmet</label><select id="ap_sid">${services.map(s=>`<option value="${s.id}">${esc(s.name)} (${s.duration_min} dk)</option>`).join('')}</select>
+    <div class="row"><div><label>Tarih</label><input id="ap_date" type="date" value="${calDay}"></div><div><label>Saat</label><input id="ap_time" type="time" value="09:00"></div></div>
+    <div id="ap_err" class="err"></div>
+    <div class="row" style="margin-top:14px;"><button class="btn" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary" onclick="saveAppt()">Kaydet</button></div>
+  `);
+  document.getElementById('ap_pid').onchange=e=>{ document.getElementById('ap_newpatient').style.display = e.target.value==='__new'?'block':'none'; };
+}
+async function saveAppt(){
+  const err=document.getElementById('ap_err');
+  try{
+    let pid=document.getElementById('ap_pid').value;
+    if(pid==='__new'){
+      const name=document.getElementById('ap_newname').value.trim();
+      if(!name){ err.textContent='Hasta adı gerekli.'; return; }
+      const np=await api('/api/patients',{method:'POST',body:JSON.stringify({name,phone:document.getElementById('ap_newphone').value.trim()})});
+      pid=np.id;
+    }
+    const date=document.getElementById('ap_date').value, time=document.getElementById('ap_time').value;
+    const start_at=new Date(date+'T'+time+':00').toISOString();
+    await api('/api/appointments',{method:'POST',body:JSON.stringify({patient_id:pid,dentist_id:document.getElementById('ap_did').value,service_id:document.getElementById('ap_sid').value,start_at})});
+    calDay=date; closeModal(); renderMain();
+  }catch(e){ err.textContent=e.message; }
+}
+
+// ---- Hastalar ----
+async function renderPatients(main){
+  const patients=await api('/api/patients');
+  main.innerHTML=`
+  <div class="card">
+    <strong>Hastalar</strong>
+    <div style="margin-top:10px">${patients.length? patients.map(p=>`<div class="patient-item" onclick="openPatient('${p.id}')">${esc(p.name)} <span class="meta">${esc(p.phone||'')}</span></div>`).join('') : '<div class="empty">Henüz hasta yok.</div>'}</div>
+  </div>`;
+}
+async function openPatient(id){
+  const d=await api('/api/patients/'+id);
+  showModal(`
+    <h3>${esc(d.patient.name)}</h3>
+    <p class="meta">${esc(d.patient.phone||'')} ${d.patient.birth_date?'· '+esc(d.patient.birth_date):''}</p>
+    <strong style="font-size:13px">Randevular</strong>
+    ${d.appointments.length? d.appointments.map(a=>`<div class="row-item">${a.start_at.slice(0,16).replace('T',' ')} ${a.status==='cancelled'?'(İptal)':''}</div>`).join('') : '<div class="empty">Kayıt yok.</div>'}
+    <strong style="font-size:13px">Tedaviler</strong>
+    ${d.treatments.length? d.treatments.map(t=>`<div class="row-item">${esc(t.procedure)} — Diş ${t.tooth_numbers.join(', ')}<div class="meta">${esc(t.notes||'')}</div></div>`).join('') : '<div class="empty">Kayıt yok.</div>'}
+    ${(me.role==='admin'||me.role==='dentist')?`<button class="btn btn-primary sm" style="margin-top:10px" onclick="openTreatmentModal('${id}')">+ Tedavi Ekle</button>`:''}
+    <div class="row" style="margin-top:14px;"><button class="btn" style="width:100%" onclick="closeModal()">Kapat</button></div>
+  `);
+}
+async function openTreatmentModal(pid){
+  const dentists=await api('/api/dentists');
+  showModal(`
+    <h3>Tedavi Ekle</h3>
+    <label>Hekim</label><select id="tr_did">${dentists.map(d=>`<option value="${d.id}" ${d.id===me.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select>
+    <label>Diş Numaraları (virgülle)</label><input id="tr_teeth" placeholder="Örn: 26, 27">
+    <label>İşlem</label><input id="tr_proc" placeholder="Örn: Kompozit dolgu">
+    <label>Not</label><textarea id="tr_notes" rows="2"></textarea>
+    <div id="tr_err" class="err"></div>
+    <div class="row" style="margin-top:14px;"><button class="btn" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary" onclick="saveTreatment('${pid}')">Kaydet</button></div>
+  `);
+}
+async function saveTreatment(pid){
+  const err=document.getElementById('tr_err');
+  try{
+    const teeth=document.getElementById('tr_teeth').value.split(',').map(s=>s.trim()).filter(Boolean);
+    const procedure=document.getElementById('tr_proc').value.trim();
+    if(!procedure){ err.textContent='İşlem adı gerekli.'; return; }
+    await api('/api/treatments',{method:'POST',body:JSON.stringify({patient_id:pid,dentist_id:document.getElementById('tr_did').value,tooth_numbers:teeth,procedure,notes:document.getElementById('tr_notes').value.trim()})});
+    closeModal(); openPatient(pid);
+  }catch(e){ err.textContent=e.message; }
+}
+
+function showModal(html){ document.getElementById('root').insertAdjacentHTML('beforeend', `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`); }
+function closeModal(){ const m=document.querySelector('.modal-bg'); if(m) m.remove(); }
+
+renderLogin();
+</script>
+</body>
+</html>
